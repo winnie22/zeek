@@ -6,9 +6,14 @@
 #include "util.h"
 #include "List.h"
 #include "Func.h"
-#include "iosource/IOSource.h"
-#include "iosource/PktSrc.h"
-#include "iosource/PktDumper.h"
+
+namespace iosource {
+	class IOSource;
+	class PktSrc;
+	class PktDumper;
+	}
+
+class Packet;
 
 extern void net_init(const string& interface, const string& readfile,
 		const char* writefile, int do_watchdog);
