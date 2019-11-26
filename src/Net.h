@@ -10,7 +10,7 @@
 #include "iosource/PktSrc.h"
 #include "iosource/PktDumper.h"
 
-extern void net_init(name_list& interfaces, name_list& readfiles,
+extern void net_init(const string& interface, const string& readfile,
 		const char* writefile, int do_watchdog);
 extern void net_run();
 extern void net_get_final_stats();

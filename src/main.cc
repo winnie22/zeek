@@ -164,9 +164,9 @@ void usage(int code = 1)
 	fprintf(stderr, "    -e|--exec <zeek code>          | augment loaded policies by given code\n");
 	fprintf(stderr, "    -f|--filter <filter>           | tcpdump filter\n");
 	fprintf(stderr, "    -h|--help                      | command line help\n");
-	fprintf(stderr, "    -i|--iface <interface>         | read from given interface\n");
+	fprintf(stderr, "    -i|--iface <interface>         | read from given interface (only one allowed)\n");
 	fprintf(stderr, "    -p|--prefix <prefix>           | add given prefix to policy file resolution\n");
-	fprintf(stderr, "    -r|--readfile <readfile>       | read from given tcpdump file\n");
+	fprintf(stderr, "    -r|--readfile <readfile>       | read from given tcpdump file (only one allowed, pass '-' as the filename to read from stdin)\n");
 	fprintf(stderr, "    -s|--rulefile <rulefile>       | read rules from given file\n");
 	fprintf(stderr, "    -t|--tracefile <tracefile>     | activate execution tracing\n");
 	fprintf(stderr, "    -v|--version                   | print version and exit\n");
@@ -296,17 +296,17 @@ void done_with_network()
 
 #ifdef USE_PERFTOOLS_DEBUG
 
-		if ( perftools_profile )
-			{
-			HeapProfilerDump("post net_run");
-			HeapProfilerStop();
-			}
+	if ( perftools_profile )
+		{
+		HeapProfilerDump("post net_run");
+		HeapProfilerStop();
+		}
 
-		if ( heap_checker && ! heap_checker->NoLeaks() )
-			{
-			fprintf(stderr, "Memory leaks - aborting.\n");
-			abort();
-			}
+	if ( heap_checker && ! heap_checker->NoLeaks() )
+		{
+		fprintf(stderr, "Memory leaks - aborting.\n");
+		abort();
+		}
 #endif
 	}
 
@@ -466,8 +466,8 @@ int main(int argc, char** argv)
 
 	brofiler.ReadStats();
 
-	name_list interfaces;
-	name_list read_files;
+	string interface;
+	string read_file;
 	name_list rule_files;
 	char* id_name = 0;
 
@@ -593,7 +593,12 @@ int main(int argc, char** argv)
 			break;
 
 		case 'i':
-			interfaces.push_back(optarg);
+			if ( ! interface.empty() )
+				{
+				fprintf(stderr, "ERROR: Only a single interface option (-i) is allowed.\n");
+				usage(1);
+				}
+			interface = optarg;
 			break;
 
 		case 'p':
@@ -601,7 +606,12 @@ int main(int argc, char** argv)
 			break;
 
 		case 'r':
-			read_files.push_back(optarg);
+			if ( ! read_file.empty() )
+				{
+				fprintf(stderr, "ERROR: Only a trace file option (-r) is allowed.\n");
+				usage(1);
+				}
+			read_file = optarg;
 			break;
 
 		case 's':
@@ -721,7 +731,8 @@ int main(int argc, char** argv)
 			break;
 		}
 
-	if ( interfaces.length() > 0 && read_files.length() > 0 )
+	// You can only have an interface or a read file, not both.
+	if ( ! interface.empty() && ! read_file.empty() )
 		usage(1);
 
 	atexit(atexit_handler);
@@ -783,8 +794,8 @@ int main(int argc, char** argv)
 	plugin_mgr->SearchDynamicPlugins(bro_plugin_path());
 
 	if ( optind == bro_argc &&
-	     read_files.length() == 0 &&
-	     interfaces.length() == 0 &&
+	     read_file.empty() &&
+	     interface.empty() &&
 	     ! id_name && ! command_line_policy && ! print_plugins )
 		add_input_file("-");
 
@@ -816,7 +827,7 @@ int main(int argc, char** argv)
 	log_mgr = new logging::Manager();
 	input_mgr = new input::Manager();
 	file_mgr = new file_analysis::Manager();
-	broker_mgr = new bro_broker::Manager(read_files.length() > 0);
+	broker_mgr = new bro_broker::Manager(! read_file.empty());
 
 	plugin_mgr->InitPreScript();
 	analyzer_mgr->InitPreScript();
@@ -965,7 +976,7 @@ int main(int argc, char** argv)
 		// ### Add support for debug command file.
 		dbg_init_debugger(0);
 
-	if ( read_files.length() == 0 && interfaces.length() == 0 )
+	if ( read_file.empty() && interface.empty() )
 		{
 		Val* interfaces_val = internal_val("interfaces");
 		if ( interfaces_val )
@@ -974,14 +985,14 @@ int main(int argc, char** argv)
 				interfaces_val->AsString()->Render();
 
 			if ( interfaces_str[0] != '\0' )
-				add_to_name_list(interfaces_str, ' ', interfaces);
+				interface = interfaces_str;
 
 			delete [] interfaces_str;
 			}
 		}
 
 	if ( dns_type != DNS_PRIME )
-		net_init(interfaces, read_files, writefile, do_watchdog);
+		net_init(interface, read_file, writefile, do_watchdog);
 
 	net_done = internal_handler("net_done");
 
