@@ -42,6 +42,7 @@ extern "C" {
 #include "Stats.h"
 #include "Brofiler.h"
 #include "Traverse.h"
+#include "Trigger.h"
 
 #include "threading/Manager.h"
 #include "input/Manager.h"
@@ -94,6 +95,7 @@ file_analysis::Manager* file_mgr = 0;
 zeekygen::Manager* zeekygen_mgr = 0;
 iosource::Manager* iosource_mgr = 0;
 bro_broker::Manager* broker_mgr = 0;
+trigger::Manager* trigger_mgr = 0;
 
 const char* prog;
 char* writefile = 0;
@@ -829,6 +831,7 @@ int main(int argc, char** argv)
 	input_mgr = new input::Manager();
 	file_mgr = new file_analysis::Manager();
 	broker_mgr = new bro_broker::Manager(! read_file.empty());
+	trigger_mgr = new trigger::Manager();
 
 	plugin_mgr->InitPreScript();
 	analyzer_mgr->InitPreScript();
