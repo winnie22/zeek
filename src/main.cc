@@ -353,11 +353,10 @@ void terminate_bro()
 	plugin_mgr->FinishPlugins();
 
 	delete zeekygen_mgr;
-	delete timer_mgr;
 	delete event_registry;
 	delete analyzer_mgr;
 	delete file_mgr;
-	// broker_mgr is deleted via iosource_mgr
+	// broker_mgr and timer_mgr are deleted via iosource_mgr
 	delete iosource_mgr;
 	delete log_mgr;
 	delete reporter;
@@ -785,8 +784,6 @@ int main(int argc, char** argv)
 #endif
 
 	timer_mgr = new PQ_TimerMgr("<GLOBAL>");
-	// timer_mgr = new CQ_TimerMgr();
-
 	zeekygen_mgr = new zeekygen::Manager(zeekygen_config, bro_argv[0]);
 
 	add_essential_input_file("base/init-bare.zeek");
@@ -906,6 +903,7 @@ int main(int argc, char** argv)
 	plugin_mgr->InitPostScript();
 	zeekygen_mgr->InitPostScript();
 	broker_mgr->InitPostScript();
+	timer_mgr->InitPostScript();
 
 	if ( print_plugins )
 		{
