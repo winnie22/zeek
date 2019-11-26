@@ -109,8 +109,17 @@ void PktSrc::Opened(const Properties& arg_props)
 		return;
 		}
 
+
 	if ( props.is_live )
+		{
 		Info(fmt("listening on %s\n", props.path.c_str()));
+
+		// We only register the file descriptor if we're in live
+		// mode because libpcap's file descriptor for trace files
+		// isn't a reliable way to know whether we actually have
+		// data to read.
+		iosource_mgr->RegisterFd(props.selectable_fd, this);
+		}
 
 	DBG_LOG(DBG_PKTIO, "Opened source %s", props.path.c_str());
 	}
@@ -118,6 +127,7 @@ void PktSrc::Opened(const Properties& arg_props)
 void PktSrc::Closed()
 	{
 	SetClosed(true);
+	iosource_mgr->UnregisterFd(props.selectable_fd);
 
 	DBG_LOG(DBG_PKTIO, "Closed source %s", props.path.c_str());
 	}
@@ -166,7 +176,7 @@ double PktSrc::CheckPseudoTime()
 	return pseudo_time <= ct ? bro_start_time + pseudo_time : 0;
 	}
 
-void PktSrc::Init()
+void PktSrc::InitSource()
 	{
 	Open();
 	}
@@ -175,55 +185,6 @@ void PktSrc::Done()
 	{
 	if ( IsOpen() )
 		Close();
-	}
-
-void PktSrc::GetFds(iosource::FD_Set* read, iosource::FD_Set* write,
-                    iosource::FD_Set* except)
-	{
-	if ( pseudo_realtime )
-		{
-		// Select would give erroneous results. But we simulate it
-		// by setting idle accordingly.
-		SetIdle(CheckPseudoTime() == 0);
-		return;
-		}
-
-	if ( IsOpen() && props.selectable_fd >= 0 )
-		read->Insert(props.selectable_fd);
-
-	// TODO: This seems like a hack that should be removed, but doing so
-	// causes the main run loop to spin more frequently and increase cpu usage.
-	// See also commit 9cd85be308.
-	if ( read->Empty() )
-		read->Insert(0);
-
-	if ( write->Empty() )
-		write->Insert(0);
-
-	if ( except->Empty() )
-		except->Insert(0);
-	}
-
-double PktSrc::NextTimestamp(double* local_network_time)
-	{
-	if ( ! IsOpen() )
-		return -1.0;
-
-	if ( ! ExtractNextPacketInternal() )
-		return -1.0;
-
-	if ( pseudo_realtime )
-		{
-		// Delay packet if necessary.
-		double packet_time = CheckPseudoTime();
-		if ( packet_time )
-			return packet_time;
-
-		SetIdle(true);
-		return -1.0;
-		}
-
-	return current_packet.time;
 	}
 
 void PktSrc::Process()
@@ -248,7 +209,7 @@ void PktSrc::Process()
 			net_packet_dispatch(current_packet.time, &current_packet, this);
 		}
 
-	have_packet = 0;
+	have_packet = false;
 	DoneWithPacket();
 	}
 
@@ -267,10 +228,7 @@ bool PktSrc::ExtractNextPacketInternal()
 	// Don't return any packets if processing is suspended (except for the
 	// very first packet which we need to set up times).
 	if ( net_is_processing_suspended() && first_timestamp )
-		{
-		SetIdle(true);
-		return 0;
-		}
+		return false;
 
 	if ( pseudo_realtime )
 		current_wallclock = current_time(true);
@@ -280,15 +238,14 @@ bool PktSrc::ExtractNextPacketInternal()
 		if ( current_packet.time < 0 )
 			{
 			Weird("negative_packet_timestamp", &current_packet);
-			return 0;
+			return false;
 			}
 
 		if ( ! first_timestamp )
 			first_timestamp = current_packet.time;
 
-		SetIdle(false);
 		have_packet = true;
-		return 1;
+		return true;
 		}
 
 	if ( pseudo_realtime && ! IsOpen() )
@@ -297,8 +254,7 @@ bool PktSrc::ExtractNextPacketInternal()
 			iosource_mgr->Terminate();
 		}
 
-	SetIdle(true);
-	return 0;
+	return false;
 	}
 
 bool PktSrc::PrecompileBPFFilter(int index, const std::string& filter)
@@ -321,7 +277,7 @@ bool PktSrc::PrecompileBPFFilter(int index, const std::string& filter)
 		Error(msg);
 
 		delete code;
-		return 0;
+		return false;
 		}
 
 	// Store it in vector.
@@ -368,4 +324,23 @@ bool PktSrc::GetCurrentPacket(const Packet** pkt)
 
 	*pkt = &current_packet;
 	return true;
+	}
+
+double PktSrc::GetNextTimeout()
+	{
+	// If we're live we want poll to do what it has to with the file descriptor. If we're not live
+	// but we're not in pseudo-realtime mode, let the loop just spin as fast as it can. If we're
+	// in pseudo-realtime mode, find the next time that a packet is ready and have poll block until
+	// then.
+	if ( IsLive() || net_is_processing_suspended() )
+		return -1;
+	else if ( ! pseudo_realtime )
+		return 0;
+
+	if ( ! have_packet )
+		ExtractNextPacketInternal();
+
+	double pseudo_time = current_packet.time - first_timestamp;
+	double ct = (current_time(true) - first_wallclock) * pseudo_realtime;
+	return std::max(0.0, pseudo_time - ct);
 	}
