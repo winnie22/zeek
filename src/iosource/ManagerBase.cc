@@ -1,17 +1,19 @@
 // See the file "COPYING" in the main distribution directory for copyright.
 
+#include "ManagerBase.h"
+
 #include <sys/types.h>
 #include <sys/time.h>
 #include <unistd.h>
 #include <assert.h>
 
-#include <algorithm>
-
-#include "Manager.h"
 #include "IOSource.h"
+#include "Net.h"
 #include "PktSrc.h"
 #include "PktDumper.h"
 #include "plugin/Manager.h"
+#include "broker/Manager.h"
+#include "Manager.h"
 
 #include "util.h"
 
@@ -19,8 +21,35 @@
 
 using namespace iosource;
 
-Manager::~Manager()
+ManagerBase::WakeupHandler::WakeupHandler()
 	{
+	iosource_mgr->RegisterFd(flare.FD(), this);
+	}
+
+ManagerBase::WakeupHandler::~WakeupHandler()
+	{
+	iosource_mgr->UnregisterFd(flare.FD());
+	}
+
+void ManagerBase::WakeupHandler::Process()
+	{
+	flare.Extinguish();
+	}
+
+void ManagerBase::WakeupHandler::Ping(const std::string& where)
+	{
+	DBG_LOG(DBG_MAINLOOP, "Pinging WakeupHandler from %s", where.c_str());
+	flare.Fire();
+	}
+
+ManagerBase::ManagerBase()
+	{
+	}
+
+ManagerBase::~ManagerBase()
+	{
+	delete wakeup;
+
 	for ( SourceList::iterator i = sources.begin(); i != sources.end(); ++i )
 		{
 		(*i)->src->Done();
@@ -39,18 +68,30 @@ Manager::~Manager()
 	pkt_dumpers.clear();
 	}
 
-void Manager::RemoveAll()
+void ManagerBase::InitPostScript()
+	{
+	wakeup = new WakeupHandler();
+	}
+
+void ManagerBase::RemoveAll()
 	{
 	// We're cheating a bit here ...
 	dont_counts = sources.size();
 	}
 
-IOSource* Manager::FindSoonest(double* ts)
+void ManagerBase::Wakeup(const std::string& where)
 	{
+	if ( wakeup )
+		wakeup->Ping(where);
+	}
+
+void ManagerBase::FindReadySources(std::vector<IOSource*>* ready)
+	{
+	ready->clear();
+
 	// Remove sources which have gone dry. For simplicity, we only
 	// remove at most one each time.
-	for ( SourceList::iterator i = sources.begin();
-	      i != sources.end(); ++i )
+	for ( SourceList::iterator i = sources.begin(); i != sources.end(); ++i )
 		if ( ! (*i)->src->IsOpen() )
 			{
 			(*i)->src->Done();
@@ -59,127 +100,62 @@ IOSource* Manager::FindSoonest(double* ts)
 			break;
 			}
 
-	// Ideally, we would always call select on the fds to see which
-	// are ready, and return the soonest. Unfortunately, that'd mean
-	// one select-call per packet, which we can't afford in high-volume
-	// environments.  Thus, we call select only every SELECT_FREQUENCY
-	// call (or if all sources report that they are dry).
+	// If there aren't any sources and exit_only_after_terminate is false, just
+	// return an empty set of sources. We want the main loop to end.
+	if ( Size() == 0 && ( ! BifConst::exit_only_after_terminate || terminating ) )
+		return;
 
-	++call_count;
+	double timeout = -1;
+	IOSource* timeout_src = nullptr;
 
-	IOSource* soonest_src = 0;
-	double soonest_ts = 1e20;
-	double soonest_local_network_time = 1e20;
-	bool all_idle = true;
-
-	// Find soonest source of those which tell us they have something to
-	// process.
-	for ( SourceList::iterator i = sources.begin(); i != sources.end(); ++i )
+	// Find the source with the next timeout value.
+	for ( auto src : sources )
 		{
-		if ( ! (*i)->src->IsIdle() )
+		if ( src->src->IsOpen() )
 			{
-			all_idle = false;
-			double local_network_time = 0;
-			double ts = (*i)->src->NextTimestamp(&local_network_time);
-			if ( ts >= 0 && ts < soonest_ts )
+			double next = src->src->GetNextTimeout();
+			if ( timeout == -1 || ( next >= 0.0 && next < timeout ) )
 				{
-				soonest_ts = ts;
-				soonest_src = (*i)->src;
-				soonest_local_network_time =
-					local_network_time ?
-						local_network_time : ts;
-				}
-			}
-		}
+				timeout = next;
+				timeout_src = src->src;
 
-	// If we found one and aren't going to select this time,
-	// return it.
-	int maxx = 0;
-
-	if ( soonest_src && (call_count % SELECT_FREQUENCY) != 0 )
-		goto finished;
-
-	// Select on the join of all file descriptors.
-	fd_set fd_read, fd_write, fd_except;
-
-	FD_ZERO(&fd_read);
-	FD_ZERO(&fd_write);
-	FD_ZERO(&fd_except);
-
-	for ( SourceList::iterator i = sources.begin();
-	      i != sources.end(); ++i )
-		{
-		Source* src = (*i);
-
-		if ( ! src->src->IsIdle() )
-			// No need to select on sources which we know to
-			// be ready.
-			continue;
-
-		src->Clear();
-		src->src->GetFds(&src->fd_read, &src->fd_write, &src->fd_except);
-		src->SetFds(&fd_read, &fd_write, &fd_except, &maxx);
-		}
-
-	// We can't block indefinitely even when all sources are dry:
-	// we're doing some IOSource-independent stuff in the main loop,
-	// so we need to return from time to time. (Instead of no time-out
-	// at all, we use a very small one. This lets FreeBSD trigger a
-	// BPF buffer switch on the next read when the hold buffer is empty
-	// while the store buffer isn't filled yet.
-
-	struct timeval timeout;
-
-	if ( all_idle )
-		{
-		// Interesting: when all sources are dry, simply sleeping a
-		// bit *without* watching for any fd becoming ready may
-		// decrease CPU load. I guess that's because it allows
-		// the kernel's packet buffers to fill. - Robin
-		timeout.tv_sec = 0;
-		timeout.tv_usec = 20; // SELECT_TIMEOUT;
-		select(0, 0, 0, 0, &timeout);
-		}
-
-	if ( ! maxx )
-		// No selectable fd at all.
-		goto finished;
-
-	timeout.tv_sec = 0;
-	timeout.tv_usec = 0;
-
-	if ( select(maxx + 1, &fd_read, &fd_write, &fd_except, &timeout) > 0 )
-		{ // Find soonest.
-		for ( SourceList::iterator i = sources.begin();
-		      i != sources.end(); ++i )
-			{
-			Source* src = (*i);
-
-			if ( ! src->src->IsIdle() )
-				continue;
-
-			if ( src->Ready(&fd_read, &fd_write, &fd_except) )
-				{
-				double local_network_time = 0;
-				double ts = src->src->NextTimestamp(&local_network_time);
-				if ( ts >= 0.0 && ts < soonest_ts )
+				// If we found a source with a zero timeout, just return it immediately.
+				// This is a fast optimization, but we want to make sure to go through
+				// with the poll periodically to avoid starvation.
+				if ( timeout == 0 && zero_timeout_count % 100 != 0 )
 					{
-					soonest_ts = ts;
-					soonest_src = src->src;
-					soonest_local_network_time =
-						local_network_time ?
-							local_network_time : ts;
+					zero_timeout_count++;
+					ready->push_back(timeout_src);
+					return;
 					}
 				}
 			}
 		}
 
-finished:
-	*ts = soonest_local_network_time;
-	return soonest_src;
+	zero_timeout_count = 1;
+
+	// Call the appropriate poll method for what's available on the operating system.
+	Poll(ready, timeout, timeout_src);
 	}
 
-void Manager::Register(IOSource* src, bool dont_count)
+void ManagerBase::ConvertTimeout(double timeout, struct timespec& spec)
+	{
+	// If timeout ended up -1, set it to some nominal value just to keep the loop
+	// from blocking forever. This is the case of exit_only_after_terminate when
+	// there isn't anything else going on.
+	if ( timeout < 0 )
+		{
+		spec.tv_sec = 0;
+		spec.tv_nsec = 1e8;
+		}
+	else
+		{
+		spec.tv_sec = static_cast<time_t>(timeout);
+		spec.tv_nsec = static_cast<long>((timeout - spec.tv_sec) * 1e9);
+		}
+	}
+
+void ManagerBase::Register(IOSource* src, bool dont_count)
 	{
 	// First see if we already have registered that source. If so, just
 	// adjust dont_count.
@@ -195,7 +171,7 @@ void Manager::Register(IOSource* src, bool dont_count)
 			}
 		}
 
-	src->Init();
+	src->InitSource();
 	Source* s = new Source;
 	s->src = src;
 	s->dont_count = dont_count;
@@ -205,7 +181,7 @@ void Manager::Register(IOSource* src, bool dont_count)
 	sources.push_back(s);
 	}
 
-void Manager::Register(PktSrc* src)
+void ManagerBase::Register(PktSrc* src)
 	{
 	pkt_src = src;
 	Register(src, false);
@@ -230,7 +206,7 @@ static std::pair<std::string, std::string> split_prefix(std::string path)
 	return std::make_pair(prefix, path);
 	}
 
-PktSrc* Manager::OpenPktSrc(const std::string& path, bool is_live)
+PktSrc* ManagerBase::OpenPktSrc(const std::string& path, bool is_live)
 	{
 	std::pair<std::string, std::string> t = split_prefix(path);
 	std::string prefix = t.first;
@@ -276,7 +252,7 @@ PktSrc* Manager::OpenPktSrc(const std::string& path, bool is_live)
 	}
 
 
-PktDumper* Manager::OpenPktDumper(const string& path, bool append)
+PktDumper* ManagerBase::OpenPktDumper(const string& path, bool append)
 	{
 	std::pair<std::string, std::string> t = split_prefix(path);
 	std::string prefix = t.first;
@@ -316,12 +292,4 @@ PktDumper* Manager::OpenPktDumper(const string& path, bool append)
 	pkt_dumpers.push_back(pd);
 
 	return pd;
-	}
-
-void Manager::Source::SetFds(fd_set* read, fd_set* write, fd_set* except,
-                             int* maxx) const
-	{
-	*maxx = std::max(*maxx, fd_read.Set(read));
-	*maxx = std::max(*maxx, fd_write.Set(write));
-	*maxx = std::max(*maxx, fd_except.Set(except));
 	}

@@ -316,6 +316,8 @@ void terminate_bro()
 
 	terminating = true;
 
+	iosource_mgr->Wakeup("terminate_bro");
+
 	// File analysis termination may produce events, so do it early on in
 	// the termination process.
 	file_mgr->Terminate();
@@ -390,6 +392,8 @@ RETSIGTYPE sig_handler(int signo)
 	{
 	set_processing_status("TERMINATING", "sig_handler");
 	signal_val = signo;
+
+	iosource_mgr->Wakeup("sig_handler");
 
 	return RETSIGVAL;
 	}
@@ -898,6 +902,7 @@ int main(int argc, char** argv)
 	if ( reporter->Errors() > 0 )
 		exit(1);
 
+	iosource_mgr->InitPostScript();
 	plugin_mgr->InitPostScript();
 	zeekygen_mgr->InitPostScript();
 	broker_mgr->InitPostScript();
@@ -1112,8 +1117,6 @@ int main(int argc, char** argv)
 	analyzer_mgr->DumpDebug();
 
 	have_pending_timers = ! reading_traces && timer_mgr->Size() > 0;
-
-	iosource_mgr->Register(thread_mgr, true);
 
 	if ( iosource_mgr->Size() > 0 ||
 	     have_pending_timers ||

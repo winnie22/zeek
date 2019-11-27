@@ -2,25 +2,39 @@
 
 #pragma once
 
-#include <string>
-#include <list>
-#include "iosource/FD_Set.h"
+#include "zeek-config.h"
+
+#include "ManagerBase.h"
+
+#if defined(HAVE_EPOLL_H)
+#include <sys/epoll.h>
+#include <sys/timerfd.h>
+#elif defined(HAVE_KQUEUE)
+#include <sys/event.h>
+#else
+#include <poll.h>
+#endif
+
+#include <map>
+#include <vector>
+
+#include "IOSource.h"
 
 namespace iosource {
 
-class IOSource;
-class PktSrc;
-class PktDumper;
-
 /**
- * Singleton class managing all IOSources.
+ * Main IOSource manager class. This class can (and should) be specialized
+ * based on the support the OS provides for varying poll methods. The
+ * implementation files for this class are broken by those poll methods.
+ * The version that gets compiled is controlled by the CMakeLists file in
+ * the iosource directory.
  */
-class Manager {
+class Manager : public ManagerBase {
 public:
 	/**
 	 * Constructor.
 	 */
-	Manager()	{ call_count = 0; dont_counts = 0; }
+	Manager();
 
 	/**
 	 * Destructor.
@@ -28,114 +42,53 @@ public:
 	~Manager();
 
 	/**
-	 * Registers an IOSource with the manager. If the source is already
-	 * registered, the method will update its *dont_count* value but not
-	 * do anything else.
+	 * Registers a file descriptor and associated IOSource with the manager
+	 * to be checked during FindReadySources.
 	 *
-	 * @param src The source. The manager takes ownership.
-	 *
-	 * @param dont_count If true, this source does not contribute to the
-	 * number of IOSources returned by Size().  The effect is that if all
-	 * sources except for the non-counting ones have gone dry, processing
-	 * will shut down.
+	 * @param fd A file descriptor pointing at some resource that should be
+	 * checked for readiness.
+	 * @param src The IOSource that owns the file descriptor.
 	 */
-	void Register(IOSource* src, bool dont_count = false);
+	void RegisterFd(int fd, IOSource* src) override;
 
 	/**
-	 * Returns the packet source with the soonest available input. This
-	 * may block for a little while if all are dry.
-	 *
-	 * @param ts A pointer where to store the timestamp of the input that
-	 * the soonest source has available next.
-	 *
-	 * @return The source, or null if no source has input.
+	 * Unregisters a file descriptor from the FindReadySources checks.
 	 */
-	IOSource* FindSoonest(double* ts);
+	void UnregisterFd(int fd) override;
+
+protected:
 
 	/**
-	 * Returns the number of registered and still active sources,
-	 * excluding those that are registered as \a dont_cont.
-	 */
-	int Size() const	{ return sources.size() - dont_counts; }
-
-	/**
-	 * Returns the registered PktSrc. If not source is registered yet,
-	 * returns a nullptr.
-	 */
-	PktSrc* GetPktSrc() const	{ return pkt_src; }
-
-	/**
-	 * Terminate all processing immediately by removing all sources (and
-	 * therefore now returning a Size() of zero).
-	 */
-	void Terminate()	{ RemoveAll(); }
-
-	/**
-	 * Opens a new packet source.
+	 * Calls the appropriate poll method to gather a set of IOSources that are
+	 * ready for processing.
 	 *
-	 * @param path The interface or file name, as one would give to Bro \c -i.
-	 *
-	 * @param is_live True if \a path represents a live interface, false
-	 * for a file.
-	 *
-	 * @return The new packet source, or null if an error occured.
+	 * @param ready a vector used to return the ready sources.
+	 * @param timeout the value to be used for the timeout of the poll. This
+	 * should be a value relative to the current network time, not an
+	 * absolute time value. This may be zero to cause an infinite timeout or
+	 * -1 to force a very short timeout.
+	 * @param timeout_src The source associated with the current timeout value.
+	 * This is typically a timer manager object.
 	 */
-	PktSrc* OpenPktSrc(const std::string& path, bool is_live);
-
-	/**
-	 * Opens a new packet dumper.
-	 *
-	 * @param path The file name to dump into.
-	 *
-	 * @param append True to append if \a path already exists.
- 	 *
-	 * @return The new packet dumper, or null if an error occured.
-	 */
-	PktDumper* OpenPktDumper(const std::string& path, bool append);
+	void Poll(std::vector<IOSource*>* ready, double timeout, IOSource* timeout_src) override;
 
 private:
-	/**
-	 * When looking for a source with something to process, every
-	 * SELECT_FREQUENCY calls we will go ahead and block on a select().
-	 */
-	static const int SELECT_FREQUENCY = 25;
 
-	/**
-	 * Microseconds to wait in an empty select if no source is ready.
-	 */
-	static const int SELECT_TIMEOUT = 50;
+	int event_queue = -1;
+	std::map<int, IOSource*> fd_map;
 
-	void Register(PktSrc* src);
-	void RemoveAll();
+#if defined(HAVE_EPOLL_H)
+	std::vector<epoll_event> events;
+#elif defined(HAVE_KQUEUE)
+	// This is only used for the output of the call to kqueue in FindReadySources().
+	// The actual events are stored as part of the queue.
+	std::vector<struct kevent> events;
+#else
+	// Fall back to regular poll() if we don't have kqueue or epoll.
+	std::vector<pollfd> events;
+#endif
 
-	unsigned int call_count;
-	int dont_counts;
-
-	struct Source {
-		IOSource* src;
-		FD_Set fd_read;
-		FD_Set fd_write;
-		FD_Set fd_except;
-		bool dont_count;
-
-		bool Ready(fd_set* read, fd_set* write, fd_set* except) const
-			{ return fd_read.Ready(read) || fd_write.Ready(write) ||
-			         fd_except.Ready(except); }
-
-		void SetFds(fd_set* read, fd_set* write, fd_set* except,
-		            int* maxx) const;
-
-		void Clear()
-			{ fd_read.Clear(); fd_write.Clear(); fd_except.Clear(); }
-	};
-
-	typedef std::list<Source*> SourceList;
-	SourceList sources;
-
-	typedef std::list<PktDumper *> PktDumperList;
-
-	PktSrc* pkt_src = nullptr;
-	PktDumperList pkt_dumpers;
+	int timerfd = -1;
 };
 
 }
