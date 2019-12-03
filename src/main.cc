@@ -786,7 +786,7 @@ int main(int argc, char** argv)
 	createCurrentDoc("1.0");		// Set a global XML document
 #endif
 
-	timer_mgr = new PQ_TimerMgr("<GLOBAL>");
+	timer_mgr = new PQ_TimerMgr();
 	zeekygen_mgr = new zeekygen::Manager(zeekygen_config, bro_argv[0]);
 
 	add_essential_input_file("base/init-bare.zeek");
