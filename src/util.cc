@@ -686,14 +686,11 @@ string strreplace(const string& s, const string& o, const string& n)
 	{
 	string r = s;
 
-	while ( true )
+	size_t i = r.find(o);
+	while ( i != std::string::npos )
 		{
-		size_t i = r.find(o);
-
-		if ( i == std::string::npos )
-			break;
-
 		r.replace(i, o.size(), n);
+		i = r.find(o, i);
 		}
 
 	return r;
@@ -1342,7 +1339,8 @@ FILE* rotate_file(const char* name, RecordVal* rotate_info)
 	// Build file names.
 	const int buflen = strlen(name) + 128;
 
-	char newname[buflen], tmpname[buflen+4];
+	char* newname = new char[buflen];
+	char* tmpname = new char[buflen+4];
 
 	safe_snprintf(newname, buflen, "%s.%d.%.06f.tmp",
 			name, getpid(), network_time);
@@ -1355,6 +1353,8 @@ FILE* rotate_file(const char* name, RecordVal* rotate_info)
 	if ( ! newf )
 		{
 		reporter->Error("rotate_file: can't open %s: %s", tmpname, strerror(errno));
+		delete [] newname;
+		delete [] tmpname;
 		return 0;
 		}
 
@@ -1367,6 +1367,8 @@ FILE* rotate_file(const char* name, RecordVal* rotate_info)
 		fclose(newf);
 		unlink(newname);
 		unlink(tmpname);
+		delete [] newname;
+		delete [] tmpname;
 		return 0;
 		}
 
@@ -1374,6 +1376,8 @@ FILE* rotate_file(const char* name, RecordVal* rotate_info)
 	if ( unlink(name) < 0 || link(tmpname, name) < 0 || unlink(tmpname) < 0 )
 		{
 		reporter->Error("rotate_file: can't move %s to %s: %s", tmpname, name, strerror(errno));
+		delete [] newname;
+		delete [] tmpname;
 		exit(1);	// hard to fix, but shouldn't happen anyway...
 		}
 
@@ -1385,6 +1389,9 @@ FILE* rotate_file(const char* name, RecordVal* rotate_info)
 		rotate_info->Assign(2, new Val(network_time, TYPE_TIME));
 		rotate_info->Assign(3, new Val(network_time, TYPE_TIME));
 		}
+
+	delete [] newname;
+	delete [] tmpname;
 
 	return newf;
 	}
