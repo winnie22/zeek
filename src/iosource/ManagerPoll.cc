@@ -6,7 +6,7 @@
 #include <sys/time.h>
 #include <unistd.h>
 #include <assert.h>
-#include <timerfd.h>
+#include <sys/timerfd.h>
 
 #include "IOSource.h"
 #include "Net.h"
@@ -106,7 +106,7 @@ void Manager::Poll(std::vector<IOSource*>* ready, double timeout, IOSource* time
 	else if ( ret == 0 )
 		{
 		if ( timeout_src )
-			ready->insert(timeout_src);
+			ready->push_back(timeout_src);
 		}
 	else
 		{

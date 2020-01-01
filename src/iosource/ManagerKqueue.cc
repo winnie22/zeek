@@ -39,7 +39,7 @@ Manager::~Manager()
 void Manager::RegisterFd(int fd, IOSource* src)
 	{
 	struct kevent event;
-	EV_SET(&event, fd, EVFILT_READ, EV_ADD, 0, NULL, NULL);
+	EV_SET(&event, fd, EVFILT_READ, EV_ADD, 0, 0, NULL);
 	int ret = kevent(event_queue, &event, 1, NULL, 0, NULL);
 	if ( ret != -1 )
 		{

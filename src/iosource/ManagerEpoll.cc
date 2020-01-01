@@ -6,6 +6,7 @@
 #include <sys/time.h>
 #include <unistd.h>
 #include <assert.h>
+#include <sys/timerfd.h>
 
 #include "IOSource.h"
 #include "Net.h"
