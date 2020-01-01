@@ -27,6 +27,8 @@ Usage: $0 [OPTION]... [VAR=VALUE]...
                            ccache installation and CMake 3.10+)
     --toolchain=PATH       path to a CMAKE_TOOLCHAIN_FILE
                            (useful for cross-compiling)
+    --poll-backend=BACKEND specify the backend to use for polling. This can be
+                           one of three values: epoll, poll, or kqueue.
 
   Installation Directories:
     --prefix=PREFIX        installation directory [/usr/local/zeek]
@@ -155,6 +157,7 @@ append_cache_entry INSTALL_ZEEKCTL      BOOL   true
 append_cache_entry CPACK_SOURCE_IGNORE_FILES STRING
 append_cache_entry ENABLE_MOBILE_IPV6   BOOL   false
 append_cache_entry SANITIZERS           STRING ""
+append_cache_entry ZEEK_POLL_BACKEND    STRING ""
 
 # parse arguments
 while [ $# -ne 0 ]; do
@@ -193,6 +196,9 @@ while [ $# -ne 0 ]; do
         --toolchain=*)
             append_cache_entry CMAKE_TOOLCHAIN_FILE  PATH   $optarg
             ;;
+	--poll-backend=*)
+	    append_cache_entry ZEEK_POLL_BACKEND     STRING $optarg
+	    ;;
         --prefix=*)
             prefix=$optarg
             append_cache_entry CMAKE_INSTALL_PREFIX PATH   $optarg

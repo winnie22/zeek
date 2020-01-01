@@ -6,10 +6,9 @@
 
 #include "ManagerBase.h"
 
-#if defined(HAVE_EPOLL_H)
+#if defined(USE_EPOLL_BACKEND)
 #include <sys/epoll.h>
-#include <sys/timerfd.h>
-#elif defined(HAVE_KQUEUE)
+#elif defined(USE_KQUEUE_BACKEND)
 #include <sys/event.h>
 #else
 #include <poll.h>
@@ -77,13 +76,13 @@ private:
 	int event_queue = -1;
 	std::map<int, IOSource*> fd_map;
 
-#if defined(HAVE_EPOLL_H)
+#if defined(USE_EPOLL_BACKEND)
 	std::vector<epoll_event> events;
-#elif defined(HAVE_KQUEUE)
+#elif defined(USE_KQUEUE_BACKEND)
 	// This is only used for the output of the call to kqueue in FindReadySources().
 	// The actual events are stored as part of the queue.
 	std::vector<struct kevent> events;
-#else
+#elif defined(USE_POLL_BACKEND)
 	// Fall back to regular poll() if we don't have kqueue or epoll.
 	std::vector<pollfd> events;
 #endif

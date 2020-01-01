@@ -2,6 +2,8 @@
 
 #include "Manager.h"
 
+#ifdef USE_KQUEUE_BACKEND
+
 #include <sys/types.h>
 #include <sys/time.h>
 #include <unistd.h>
@@ -104,3 +106,5 @@ void Manager::Poll(std::vector<IOSource*>* ready, double timeout, IOSource* time
 			}
 		}
 	}
+
+#endif

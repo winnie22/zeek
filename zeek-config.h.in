@@ -1,13 +1,14 @@
 #pragma once
 
-/* Define if you have sys.epoll.h */
-#cmakedefine HAVE_EPOLL_H
+/* The next three defines should be mutually exclusive */
+/* Define if the epoll backend should be used */
+#cmakedefine USE_EPOLL_BACKEND
 
-/* Define if you have sys/timerfd.h */
-#cmakedefine HAVE_TIMERFD_H
+/* Define if the kqueue backend should be used */
+#cmakedefine USE_KQUEUE_BACKEND
 
-/* Define if you have kqueue() in sys/event.h */
-#cmakedefine HAVE_KQUEUE
+/* Define if the poll backend should be used */
+#cmakedefine USE_POLL_BACKEND
 
 /* Old libpcap versions (< 0.6.1) need defining pcap_freecode and
    pcap_compile_nopcap */
