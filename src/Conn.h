@@ -303,7 +303,7 @@ protected:
 	// Add the given timer to expire at time t.  If do_expire
 	// is true, then the timer is also evaluated when Bro terminates,
 	// otherwise not.
-	void AddTimer(timer_func timer, double t, int do_expire,
+	void AddTimer(timer_func timer, double t, bool do_expire,
 			TimerType type);
 
 	void RemoveTimer(Timer* t);
@@ -338,16 +338,16 @@ protected:
 	const EncapsulationStack* encapsulation; // tunnels
 	int suppress_event;	// suppress certain events to once per conn.
 
-	unsigned int installed_status_timer:1;
-	unsigned int timers_canceled:1;
-	unsigned int is_active:1;
-	unsigned int skip:1;
-	unsigned int weird:1;
-	unsigned int finished:1;
-	unsigned int record_packets:1, record_contents:1;
-	unsigned int record_current_packet:1, record_current_content:1;
-	unsigned int saw_first_orig_packet:1, saw_first_resp_packet:1;
-	unsigned int is_successful:1;
+	bool installed_status_timer;
+	bool timers_canceled;
+	bool is_active;
+	bool skip;
+	bool weird;
+	bool finished;
+	bool record_packets, record_contents;
+	bool record_current_packet, record_current_content;
+	bool saw_first_orig_packet, saw_first_resp_packet;
+	bool is_successful;
 
 	// Count number of connections.
 	static uint64_t total_connections;
@@ -367,7 +367,7 @@ protected:
 class ConnectionTimer : public Timer {
 public:
 	ConnectionTimer(Connection* arg_conn, timer_func arg_timer,
-			double arg_t, int arg_do_expire, TimerType arg_type)
+			double arg_t, bool arg_do_expire, TimerType arg_type)
 		: Timer(arg_t, arg_type)
 		{ Init(arg_conn, arg_timer, arg_do_expire); }
 	~ConnectionTimer() override;
@@ -377,11 +377,11 @@ public:
 protected:
 	ConnectionTimer()	{}
 
-	void Init(Connection* conn, timer_func timer, int do_expire);
+	void Init(Connection* conn, timer_func timer, bool do_expire);
 
 	Connection* conn;
 	timer_func timer;
-	int do_expire;
+	bool do_expire;
 };
 
 #define ADD_TIMER(timer, t, do_expire, type) \

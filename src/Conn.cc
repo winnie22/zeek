@@ -18,7 +18,7 @@
 #include "analyzer/Manager.h"
 
 void ConnectionTimer::Init(Connection* arg_conn, timer_func arg_timer,
-				int arg_do_expire)
+				bool arg_do_expire)
 	{
 	conn = arg_conn;
 	timer = arg_timer;
@@ -70,8 +70,8 @@ Connection::Connection(NetSessions* s, const ConnIDKey& k, double t, const ConnI
 	proto = TRANSPORT_UNKNOWN;
 	orig_flow_label = flow;
 	resp_flow_label = 0;
-	saw_first_orig_packet = 1;
-	saw_first_resp_packet = 0;
+	saw_first_orig_packet = true;
+	saw_first_resp_packet = false;
 	is_successful = false;
 
 	if ( pkt->l2_src )
@@ -87,29 +87,29 @@ Connection::Connection(NetSessions* s, const ConnIDKey& k, double t, const ConnI
 	vlan = pkt->vlan;
 	inner_vlan = pkt->inner_vlan;
 
-	conn_val = 0;
-	login_conn = 0;
+	conn_val = nullptr;
+	login_conn = nullptr;
 
-	is_active = 1;
-	skip = 0;
-	weird = 0;
+	is_active = true;
+	skip = false;
+	weird = false;
 
-	suppress_event = 0;
+	suppress_event = false;
 
-	record_contents = record_packets = 1;
-	record_current_packet = record_current_content = 0;
+	record_contents = record_packets = true;
+	record_current_packet = record_current_content = false;
 
-	timers_canceled = 0;
-	inactivity_timeout = 0;
-	installed_status_timer = 0;
+	timers_canceled = false;
+	inactivity_timeout = false;
+	installed_status_timer = false;
 
-	finished = 0;
+	finished = false;
 
-	hist_seen = 0;
+	hist_seen = false;
 	history = "";
 
-	root_analyzer = 0;
-	primary_PIA = 0;
+	root_analyzer = nullptr;
+	primary_PIA = nullptr;
 
 	++current_connections;
 	++total_connections;
@@ -172,7 +172,7 @@ void Connection::CheckEncapsulation(const EncapsulationStack* arg_encap)
 		EncapsulationStack empty;
 		Event(tunnel_changed, 0, empty.GetVectorVal());
 		delete encapsulation;
-		encapsulation = 0;
+		encapsulation = nullptr;
 		}
 
 	else if ( arg_encap )
@@ -184,7 +184,7 @@ void Connection::CheckEncapsulation(const EncapsulationStack* arg_encap)
 
 void Connection::Done()
 	{
-	finished = 1;
+	finished = true;
 
 	if ( root_analyzer && ! root_analyzer->IsFinished() )
 		root_analyzer->Done();
@@ -222,7 +222,7 @@ void Connection::NextPacket(double t, int is_orig,
 		last_time = t;
 
 	current_timestamp = 0;
-	current_pkt = 0;
+	current_pkt = nullptr;
 	}
 
 void Connection::SetLifetime(double lifetime)
@@ -330,7 +330,7 @@ void Connection::EnableStatusUpdateTimer()
 		ADD_TIMER(&Connection::StatusUpdateTimer,
 			network_time + connection_status_update_interval, 0,
 			TIMER_CONN_STATUS_UPDATE);
-		installed_status_timer = 1;
+		installed_status_timer = true;
 		}
 	}
 
@@ -533,7 +533,7 @@ void Connection::Weird(const char* name, const char* addl)
 	reporter->Weird(this, name, addl ? addl : "");
 	}
 
-void Connection::AddTimer(timer_func timer, double t, int do_expire,
+void Connection::AddTimer(timer_func timer, double t, bool do_expire,
 		TimerType type)
 	{
 	if ( timers_canceled )
@@ -567,7 +567,7 @@ void Connection::CancelTimers()
 	for ( const auto& timer : tmp )
 		GetTimerMgr()->Cancel(timer);
 
-	timers_canceled = 1;
+	timers_canceled = true;
 	timers.clear();
 	}
 
@@ -609,7 +609,7 @@ void Connection::FlipRoles()
 	orig_flow_label = tmp_flow;
 
 	Unref(conn_val);
-	conn_val = 0;
+	conn_val = nullptr;
 
 	if ( root_analyzer )
 		root_analyzer->FlipRoles();
@@ -726,9 +726,9 @@ void Connection::CheckFlowLabel(bool is_orig, uint32_t flow_label)
 		}
 
 	if ( is_orig )
-		saw_first_orig_packet = 1;
+		saw_first_orig_packet = true;
 	else
-		saw_first_resp_packet = 1;
+		saw_first_resp_packet = true;
 	}
 
 bool Connection::PermitWeird(const char* name, uint64_t threshold, uint64_t rate,
